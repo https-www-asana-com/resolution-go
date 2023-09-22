@@ -1,9 +1,11 @@
 package resolution
 
 import (
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/unstoppabledomains/resolution-go/v2/dnsrecords"
-	"github.com/unstoppabledomains/resolution-go/v2/namingservice"
+	"github.com/unstoppabledomains/resolution-go/v3/dnsrecords"
+	"github.com/unstoppabledomains/resolution-go/v3/namingservice"
 )
 
 // Uns is a naming service handles Unstoppable domains resolution.
@@ -48,6 +50,10 @@ func (c *Uns) Data(domainName string, keys []string) (*struct {
 		return data, err
 	}
 	return nil, err
+}
+
+func (c *Uns) DomainExpiry(domainName string) (time.Time, error) {
+	return time.Time{}, &MethodIsNotSupportedError{NamingServiceName: namingservice.UNS}
 }
 
 func (c *Uns) Records(domainName string, keys []string) (map[string]string, error) {
@@ -103,6 +109,24 @@ func (c *Uns) AddrVersion(domainName string, ticker string, version string) (str
 			} else {
 				return "", &DomainNotSupportedError{DomainName: domainName}
 			}
+		}})
+}
+
+func (c *Uns) GetAddr(domainName, family, token string) (string, error) {
+	return resolveString(stringResolverParams{
+		L2Function: func() (string, error) { return c.l2Service.getAddress(domainName, family, token) },
+		L1Function: func() (string, error) { return c.l1Service.getAddress(domainName, family, token) },
+		ZFunction: func() (string, error) {
+			return "", &DomainNotRegisteredError{DomainName: domainName}
+		}})
+}
+
+func (c *Uns) ReverseOf(addr string) (string, error) {
+	return resolveString(stringResolverParams{
+		L1Function: func() (string, error) { return c.l1Service.reverseOf(addr) },
+		L2Function: func() (string, error) { return c.l2Service.reverseOf(addr) },
+		ZFunction: func() (string, error) {
+			return "", &AddressNotSupportedError{Address: addr}
 		}})
 }
 

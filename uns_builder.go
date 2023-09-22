@@ -7,7 +7,8 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/unstoppabledomains/resolution-go/v2/uns/contracts/proxyreader"
+	"github.com/unstoppabledomains/resolution-go/v3/udclient"
+	"github.com/unstoppabledomains/resolution-go/v3/uns/contracts/proxyreader"
 )
 
 // UnsBuilder is a builder to setup and build instance of Uns
@@ -15,11 +16,20 @@ type UnsBuilder interface {
 	// SetContractBackend set Ethereum backend for communication with UNS registry
 	SetContractBackend(backend bind.ContractBackend) UnsBuilder
 
+	// SetContractBackendProviderUrl set Ethereum backend Rpc URL
+	SetContractBackendProviderUrl(url string) UnsBuilder
+
 	// SetL2ContractBackend set Ethereum backend for communication with UNS L2registry
 	SetL2ContractBackend(backend bind.ContractBackend) UnsBuilder
 
+	// SetL2ContractBackendProviderUrl set Polygon backend Rpc URL
+	SetL2ContractBackendProviderUrl(url string) UnsBuilder
+
 	// SetMetadataClient set http backend for communication with ERC721 metadata server
 	SetMetadataClient(backend MetadataClient) UnsBuilder
+
+	// SetUdClient set http proxy backends for communication with UNS registry
+	SetUdClient(apiKey string) UnsBuilder
 
 	// SetEthereumNetwork set Ethereum network for communication with UNS registry
 	SetEthereumNetwork(network string) UnsBuilder
@@ -37,6 +47,8 @@ type unsBuilder struct {
 	metadataClient    MetadataClient
 	l1Network         string
 	l2Network         string
+	l1ProviderUrl     string
+	l2ProviderUrl     string
 }
 
 // NewUnsBuilder Creates builder to setup new instance of Uns
@@ -53,14 +65,38 @@ func (cb *unsBuilder) SetContractBackend(backend bind.ContractBackend) UnsBuilde
 	return cb
 }
 
-// SetContractBackend set Ethereum backend for communication with UNS registry
+// SetContractBackendProviderUrl set Ethereum backend Rpc URL
+func (cb *unsBuilder) SetContractBackendProviderUrl(url string) UnsBuilder {
+	cb.l1ProviderUrl = url
+	return cb
+}
+
+// SetL2ContractBackend set Polygon backend for communication with UNS registry
 func (cb *unsBuilder) SetL2ContractBackend(backend bind.ContractBackend) UnsBuilder {
 	cb.l2ContractBackend = backend
 	return cb
 }
 
+// SetL2ContractBackendProviderUrl set Polygon backend Rpc URL
+func (cb *unsBuilder) SetL2ContractBackendProviderUrl(url string) UnsBuilder {
+	cb.l2ProviderUrl = url
+	return cb
+}
+
 func (cb *unsBuilder) SetMetadataClient(client MetadataClient) UnsBuilder {
 	cb.metadataClient = client
+	return cb
+}
+
+func (cb *unsBuilder) SetUdClient(apiKey string) UnsBuilder {
+	client, err := udclient.Dial(apiKey)
+
+	if err != nil {
+		panic(err)
+	}
+
+	cb.l1ContractBackend = client.L1ContractBackend
+	cb.l2ContractBackend = client.L2ContractBackend
 	return cb
 }
 
@@ -102,7 +138,25 @@ func (cb *unsBuilder) BuildService(netContracts contracts, contractBackend bind.
 		return nil, err
 	}
 
-	return &UnsService{proxyReader: proxyReaderContract, supportedKeys: supportedKeys, contractBackend: contractBackend, metadataClient: cb.metadataClient, cnsDefaultResolver: cnsDefaultResolver, unsRegistry: unsRegistry, unsStartingEventsBlock: unsStartingEventsBlock, cnsStartingEventsBlock: cnsStartingEventsBlock}, nil
+	var metadataServiceUrl string
+
+	if cb.l1Network == "mainnet" && cb.l2Network == "polygon" {
+		metadataServiceUrl = udclient.MetadataMainnetBaseUrl
+	} else {
+		metadataServiceUrl = udclient.MetadataTestnetBaseUrl
+	}
+
+	return &UnsService{
+		proxyReader:            proxyReaderContract,
+		supportedKeys:          supportedKeys,
+		contractBackend:        contractBackend,
+		metadataClient:         cb.metadataClient,
+		cnsDefaultResolver:     cnsDefaultResolver,
+		unsRegistry:            unsRegistry,
+		unsStartingEventsBlock: unsStartingEventsBlock,
+		cnsStartingEventsBlock: cnsStartingEventsBlock,
+		metadataServiceUrl:     metadataServiceUrl,
+	}, nil
 }
 
 // Build Uns instance
@@ -122,30 +176,31 @@ func (cb *unsBuilder) Build() (*Uns, error) {
 	if cb.l2Network == "" {
 		return nil, &UnsConfigurationError{Layer: Layer2, InvalidField: "network"}
 	}
-	l1Custom, l2Custom := cb.l1ContractBackend != nil, cb.l2ContractBackend != nil
-	if l1Custom != l2Custom {
-		if l1Custom {
-			return nil, &UnsConfigurationError{Layer: Layer2, InvalidField: "contractBackend"}
-		} else {
-			return nil, &UnsConfigurationError{Layer: Layer1, InvalidField: "contractBackend"}
-		}
+
+	if cb.l1ContractBackend == nil && cb.l1ProviderUrl == "" {
+		return nil, &UnsConfigurationError{Layer: Layer1, InvalidField: "contractBackend"}
 	}
 
-	l1Service, err := cb.BuildService(contracts[cb.l1Network], cb.l1ContractBackend, NetworkProviders[cb.l1Network])
+	if cb.l2ContractBackend == nil && cb.l2ProviderUrl == "" {
+		return nil, &UnsConfigurationError{Layer: Layer2, InvalidField: "contractBackend"}
+	}
+
+	l1Service, err := cb.BuildService(contracts[cb.l1Network], cb.l1ContractBackend, cb.l1ProviderUrl)
 	if err != nil {
 		return nil, err
 	}
+
 	l1Service.networkId = NetworkNameToId[cb.l1Network]
-	l1Service.blockchainProviderUrl = NetworkProviders[cb.l1Network]
+	l1Service.blockchainProviderUrl = cb.l1ProviderUrl
 	l1Service.Layer = Layer1
 
-	l2Service, err := cb.BuildService(contracts[cb.l2Network], cb.l2ContractBackend, NetworkProviders[cb.l2Network])
+	l2Service, err := cb.BuildService(contracts[cb.l2Network], cb.l2ContractBackend, cb.l2ProviderUrl)
 	if err != nil {
 		return nil, err
 	}
 	l2Service.Layer = Layer2
 	l2Service.networkId = NetworkNameToId[cb.l2Network]
-	l2Service.blockchainProviderUrl = NetworkProviders[cb.l2Network]
+	l2Service.blockchainProviderUrl = cb.l2ProviderUrl
 
 	zService, err := NewZnsBuilder().Build()
 	if err != nil {

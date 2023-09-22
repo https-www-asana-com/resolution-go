@@ -1,13 +1,29 @@
+## v3.2.0 - 2023-09-19
+
+Add web3domain support which includes ENS domain resolution
+
+## v3.1.0 - 2023-07-10
+
+Add GetAddr, ReverseOf API
+
+## v3.0.0 - 2023-04-05
+
+Remove default RPC urls, Allow initialized with UD partner key
+
 ## 2.3.2
+
 - Update supported keys in `keys.go`
 
 ## 2.3.1
+
 - Update config to use Infura
 
 ## 2.3.0
+
 - Deprecate `AllRecords` method
 
 ## 2.2.0
+
 - Use default networks for UnsBuilder
 
 ## 2.1.0
